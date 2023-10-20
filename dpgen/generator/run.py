@@ -1003,12 +1003,16 @@ def revise_lmp_input_model(lmp_lines, task_model_list, trj_freq, deepmd_version=
             trj_freq,
         )
     else:
-        lmp_lines[
-            idx
-        ] = "pair_style      deepmd %s out_freq %d out_file model_devi.out\n" % (
-            graph_list,
-            trj_freq,
-        )
+        if 'fparam' in lmp_lines[idx].split():
+            lmp_lines[idx] = "pair_style      deepmd %s out_freq %d out_file model_devi.out fparam %s\n" % (graph_list, trj_freq, lmp_lines[idx].split()[
+                lmp_lines[idx].split().index('fparam')+1])
+        else:
+            lmp_lines[
+                idx
+            ] = "pair_style      deepmd %s out_freq %d out_file model_devi.out\n" % (
+                graph_list,
+                trj_freq,
+            )
     return lmp_lines
 
 
@@ -1186,7 +1190,7 @@ def make_model_devi(iter_index, jdata, mdata):
                 models_path = os.path.join(temp_calypso_run_opt_path, model_name)
                 if not os.path.exists(models_path):
                     os.symlink(mm, models_path)
-
+####???
     with open(os.path.join(work_path, "cur_job.json"), "w") as outfile:
         json.dump(cur_job, outfile, indent=4)
 
@@ -3400,6 +3404,59 @@ def make_fp_abacus_scf(iter_index, jdata):
     # link pp and orbital files
     _link_fp_abacus_pporb_descript(iter_index, jdata)
 
+    #for GCHMC
+    Ne_num = [2113.6,2113.7]
+    model_devi_new = jdata.get("model_devi_new", False)
+    if model_devi_new == "GCHMC":
+        all_task_dirs = glob.glob(os.path.join("iter.%06d"%iter_index, "02.fp/task.*.*"))
+        all_task_dirs.sort()
+        cwd = os.getcwd()
+        counter = 0
+        for task_dirs in all_task_dirs:
+            os.chdir(task_dirs)
+            sys_index = int(task_dirs.split("/")[-1].split(".")[1])
+            
+            for i in range(jdata.get("Ne_task_numbers")):
+                cwd2 = os.getcwd()
+                os.chdir("..")
+                Ne_dir = "Ne/task.%03d.%06d"%(sys_index, counter)
+                create_path(Ne_dir)
+                Ne_dir_abspath = os.path.abspath(Ne_dir)
+                os.chdir(cwd2)               
+                Ne = Ne_num[i]             
+                with open("INPUT", "r") as f:
+                    original = f.read()
+                with open("INPUT_New", "w") as new_f:
+                    new_f.write(original)
+                with open("INPUT_New", "a") as new_f:
+                    new_f.write("nelec = %.2f"%Ne)
+               # shutil.copy2("STRU", os.path.join(Ne_dir_abspath, "STRU"))
+               # shutil.copy2("POTCAR", os.path.join(Ne_dir_abspath, "POTCAR"))    
+               # shutil.copy2("INPUT_New", os.path.join(Ne_dir_abspath, "INPUT"))
+               # shutil.copy2("KPT", os.path.join(Ne_dir_abspath, "KPT"))
+                for item in os.listdir(os.getcwd()):
+                    source_item = os.path.join(os.getcwd(), item)
+                    target_item = os.path.join(Ne_dir_abspath, item)
+                    if os.path.isfile(source_item):                   
+                        shutil.copy(source_item, target_item)   
+                    elif os.path.isdir(source_item):
+                        shutil.copytree(source_item, target_item)
+                        
+                destination_path = os.path.join(os.getcwd(), Ne_dir_abspath)
+                for item in os.listdir(destination_path):
+                    item_path = os.path.join(destination_path, item)
+                    if os.path.isfile(item_path) and item == "INPUT":
+                        os.remove(item_path)                    
+                for item in os.listdir(destination_path):
+                    item_path = os.path.join(destination_path, item)
+                    if os.path.isfile(item_path) and item == "INPUT_New":
+                        new_name = os.path.join(destination_path, "INPUT")
+                        os.rename(item_path, new_name)
+                counter += 1
+            os.chdir(cwd)
+        os.chdir("iter.%06d/02.fp"%iter_index)
+        os.system("rm -rf task.*; mv Ne/* .; rm -rf Ne")
+        os.chdir(cwd)
 
 def make_fp_siesta(iter_index, jdata):
     work_path = os.path.join(make_iter_name(iter_index), fp_name)
